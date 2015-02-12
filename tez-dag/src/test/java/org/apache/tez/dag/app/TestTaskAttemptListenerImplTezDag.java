@@ -1,16 +1,16 @@
 /*
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 package org.apache.tez.dag.app;
 
@@ -18,6 +18,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 
@@ -28,11 +29,14 @@ import java.util.Map;
 import org.apache.hadoop.yarn.api.records.ApplicationAccessType;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
+import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.event.EventHandler;
 import org.apache.tez.common.ContainerContext;
 import org.apache.tez.common.ContainerTask;
-import org.apache.tez.common.security.JobTokenSecretManager;
+import org.apache.tez.common.TezTaskUmbilicalProtocol;
+import org.apache.tez.dag.api.TaskCommunicatorContext;
 import org.apache.tez.dag.app.dag.DAG;
 import org.apache.tez.dag.app.rm.container.AMContainer;
 import org.apache.tez.dag.app.rm.container.AMContainerMap;
@@ -55,10 +59,18 @@ public class TestTaskAttemptListenerImplTezDag {
     doReturn(dag).when(appContext).getCurrentDAG();
     doReturn(appAcls).when(appContext).getApplicationACLs();
     doReturn(amContainerMap).when(appContext).getAllContainers();
+    NodeId nodeId = NodeId.newInstance("localhost", 0);
+    AMContainer amContainer = mock(AMContainer.class);
+    Container container = mock(Container.class);
+    doReturn(nodeId).when(container).getNodeId();
+    doReturn(amContainer).when(amContainerMap).get(any(ContainerId.class));
+    doReturn(container).when(amContainer).getContainer();
 
     TaskAttemptListenerImpTezDag taskAttemptListener =
-        new TaskAttemptListenerImplForTest(appContext, mock(TaskHeartbeatHandler.class),
+        new TaskAttemptListenerImpTezDag(appContext, mock(TaskHeartbeatHandler.class),
             mock(ContainerHeartbeatHandler.class), null);
+    TezTaskCommunicatorImpl taskCommunicator = (TezTaskCommunicatorImpl)taskAttemptListener.getTaskCommunicator();
+    TezTaskUmbilicalProtocol tezUmbilical = taskCommunicator.getUmbilical();
 
 
     TaskSpec taskSpec = mock(TaskSpec.class);
@@ -69,33 +81,31 @@ public class TestTaskAttemptListenerImplTezDag {
 
 
     ContainerId containerId1 = createContainerId(appId, 1);
-    doReturn(mock(AMContainer.class)).when(amContainerMap).get(containerId1);
     ContainerContext containerContext1 = new ContainerContext(containerId1.toString());
-    containerTask = taskAttemptListener.getTask(containerContext1);
+    containerTask = tezUmbilical.getTask(containerContext1);
     assertTrue(containerTask.shouldDie());
 
 
     ContainerId containerId2 = createContainerId(appId, 2);
-    doReturn(mock(AMContainer.class)).when(amContainerMap).get(containerId2);
     ContainerContext containerContext2 = new ContainerContext(containerId2.toString());
     taskAttemptListener.registerRunningContainer(containerId2);
-    containerTask = taskAttemptListener.getTask(containerContext2);
+    containerTask = tezUmbilical.getTask(containerContext2);
     assertNull(containerTask);
 
     // Valid task registered
     taskAttemptListener.registerTaskAttempt(amContainerTask, containerId2);
-    containerTask = taskAttemptListener.getTask(containerContext2);
+    containerTask = tezUmbilical.getTask(containerContext2);
     assertFalse(containerTask.shouldDie());
     assertEquals(taskSpec, containerTask.getTaskSpec());
 
     // Task unregistered. Should respond to heartbeats
     taskAttemptListener.unregisterTaskAttempt(taskAttemptId);
-    containerTask = taskAttemptListener.getTask(containerContext2);
+    containerTask = tezUmbilical.getTask(containerContext2);
     assertNull(containerTask);
 
     // Container unregistered. Should send a shouldDie = true
     taskAttemptListener.unregisterRunningContainer(containerId2);
-    containerTask = taskAttemptListener.getTask(containerContext2);
+    containerTask = tezUmbilical.getTask(containerContext2);
     assertTrue(containerTask.shouldDie());
 
     ContainerId containerId3 = createContainerId(appId, 3);
@@ -109,7 +119,7 @@ public class TestTaskAttemptListenerImplTezDag {
     AMContainerTask amContainerTask2 = new AMContainerTask(taskSpec, null, null, false);
     taskAttemptListener.registerTaskAttempt(amContainerTask2, containerId3);
     taskAttemptListener.unregisterRunningContainer(containerId3);
-    containerTask = taskAttemptListener.getTask(containerContext3);
+    containerTask = tezUmbilical.getTask(containerContext3);
     assertTrue(containerTask.shouldDie());
   }
 
@@ -125,10 +135,18 @@ public class TestTaskAttemptListenerImplTezDag {
     doReturn(dag).when(appContext).getCurrentDAG();
     doReturn(appAcls).when(appContext).getApplicationACLs();
     doReturn(amContainerMap).when(appContext).getAllContainers();
+    NodeId nodeId = NodeId.newInstance("localhost", 0);
+    AMContainer amContainer = mock(AMContainer.class);
+    Container container = mock(Container.class);
+    doReturn(nodeId).when(container).getNodeId();
+    doReturn(amContainer).when(amContainerMap).get(any(ContainerId.class));
+    doReturn(container).when(amContainer).getContainer();
 
     TaskAttemptListenerImpTezDag taskAttemptListener =
-        new TaskAttemptListenerImplForTest(appContext, mock(TaskHeartbeatHandler.class),
+        new TaskAttemptListenerImpTezDag(appContext, mock(TaskHeartbeatHandler.class),
             mock(ContainerHeartbeatHandler.class), null);
+    TezTaskCommunicatorImpl taskCommunicator = (TezTaskCommunicatorImpl)taskAttemptListener.getTaskCommunicator();
+    TezTaskUmbilicalProtocol tezUmbilical = taskCommunicator.getUmbilical();
 
 
     TaskSpec taskSpec = mock(TaskSpec.class);
@@ -139,20 +157,19 @@ public class TestTaskAttemptListenerImplTezDag {
 
 
     ContainerId containerId1 = createContainerId(appId, 1);
-    doReturn(mock(AMContainer.class)).when(amContainerMap).get(containerId1);
     ContainerContext containerContext1 = new ContainerContext(containerId1.toString());
     taskAttemptListener.registerRunningContainer(containerId1);
-    containerTask = taskAttemptListener.getTask(containerContext1);
+    containerTask = tezUmbilical.getTask(containerContext1);
     assertNull(containerTask);
 
     // Register task
     taskAttemptListener.registerTaskAttempt(amContainerTask, containerId1);
-    containerTask = taskAttemptListener.getTask(containerContext1);
+    containerTask = tezUmbilical.getTask(containerContext1);
     assertFalse(containerTask.shouldDie());
     assertEquals(taskSpec, containerTask.getTaskSpec());
 
     // Try pulling again - simulates re-use pull
-    containerTask = taskAttemptListener.getTask(containerContext1);
+    containerTask = tezUmbilical.getTask(containerContext1);
     assertNull(containerTask);
   }
 
@@ -162,13 +179,11 @@ public class TestTaskAttemptListenerImplTezDag {
     return containerId;
   }
 
-  private static class TaskAttemptListenerImplForTest extends TaskAttemptListenerImpTezDag {
+  private static class TezTaskCommunicatorImplForTest extends TezTaskCommunicatorImpl {
 
-    public TaskAttemptListenerImplForTest(AppContext context,
-                                          TaskHeartbeatHandler thh,
-                                          ContainerHeartbeatHandler chh,
-                                          JobTokenSecretManager jobTokenSecretManager) {
-      super(context, thh, chh, jobTokenSecretManager);
+    public TezTaskCommunicatorImplForTest(
+        TaskCommunicatorContext taskCommunicatorContext) {
+      super(taskCommunicatorContext);
     }
 
     @Override
